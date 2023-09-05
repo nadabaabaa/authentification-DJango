@@ -41,11 +41,11 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'App1',
     'users',
-    'rest_framework',
     'drf_yasg',
     #
     #'corsheaders',
      #'knox',
+    'rest_framework',
     'rest_framework.authtoken',
 
 ]
@@ -161,9 +161,10 @@ CORS_ALLOWED_ORIGINS = [
 
 ]
 CORS_ALLOW_ALL_ORIGINS = True  # Set this to True for development, but use a list of allowed origins in production.
-REST_FTAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES':[
-    'knox.auth.TokenAuthentication',
-    #know mtaa l authentification
-    ]
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
+    ],
+    # Other settings...
 }
