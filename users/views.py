@@ -128,6 +128,7 @@ class LogoutView(APIView):
 """
 # accounts/views.py
 
+from datetime import timedelta, timezone
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
@@ -139,10 +140,28 @@ from django.core.exceptions import ObjectDoesNotExist
 from rest_framework.permissions import IsAuthenticated
 from .models import User
 #####
+from .models import UniqueToken
+#from django.contrib.auth.models import User
+import uuid
+from django.contrib.auth import update_session_auth_hash
+from .serializers import ChangePasswordSerializer
+from .serializers import LoginSerializer  # Import your LoginSerializer
+from drf_yasg.utils import swagger_auto_schema
+
+
 '''from django.contrib.auth import authenticate
 from django.http import JsonResponse
 from rest_framework.permissions import AllowAny
 '''
+@swagger_auto_schema(method='POST',
+    request_body=UserSerializer,
+    responses={200: 'Successfully created an account', 400: 'Bad request. Invalid input data.',
+    401: 'Unauthorized. Invalid credentials.',
+    404: 'User does not exist.',
+    500: 'Internal server error. Failed to generate a token.',
+},
+)   
+
 @api_view(['POST'])
 def register_user(request):
     if request.method == 'POST':
@@ -151,30 +170,45 @@ def register_user(request):
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+@swagger_auto_schema(method='POST',
+    request_body=LoginSerializer,
+    responses={200: 'Successfully logged in and token generated', 400: 'Bad request. Invalid input data.',
+    401: 'Unauthorized. Invalid credentials.',
+    404: 'User does not exist.',
+    500: 'Internal server error. Failed to generate a token.',
+},
+)   
 @api_view(['POST'])
 def user_login(request):
     if request.method == 'POST':
-        username = request.data.get('username')
-        password = request.data.get('password')
+      serializer = LoginSerializer(data=request.data)
+    if serializer.is_valid():
 
-        user = None
-        if '@' in username:
+         username = serializer.data.get('username')
+         password = serializer.data.get('password')
+        # user = None
+
+         if '@' in username:
             try:
                 user = User.objects.get(email=username)
             except ObjectDoesNotExist:
-                pass
+                return Response({'error': 'User does not exist'}, status=status.HTTP_404_NOT_FOUND)
 
-        if not user:
+         if not user:
             user = authenticate(username=username, password=password)
 
-        if user:
-            token, _ = Token.objects.get_or_create(user=user)
-            return Response({'token': token.key}, status=status.HTTP_200_OK)
+         if user:
+            # Generate a unique token for the user
+            token = generate_unique_token(user)
 
-        return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
- 
+            if not token:
+                return Response({'error': 'Failed to generate a token'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+            return Response({'token': str(token)}, status=status.HTTP_200_OK)
+        
+         return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+            ########## 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def user_logout(request):
@@ -185,3 +219,44 @@ def user_logout(request):
             return Response({'message': 'Successfully logged out.'}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)    
+
+def generate_unique_token(user):
+    token = UniqueToken(user=user)
+    token.save()
+    return token
+
+def validate_unique_token(user, token):
+    try:
+        unique_token = UniqueToken.objects.get(user=user, token=token, used=False)
+        unique_token.used = True
+        unique_token.save()
+        return True
+    except UniqueToken.DoesNotExist:
+        return False
+    
+ #   
+@swagger_auto_schema(method='POST',
+    request_body=ChangePasswordSerializer,
+    responses={200: 'Successfully logged in and you can change your password', 400: 'Bad request. Invalid input data.',
+    401: 'Unauthorized. Invalid credentials.',
+    404: 'User does not exist.',
+    500: 'Internal server error. Failed to generate a token.',
+},
+)   
+    
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    if request.method == 'POST':
+        serializer = ChangePasswordSerializer(data=request.data)
+        if serializer.is_valid():
+            user = request.user
+            if user.check_password(serializer.data.get('old_password')):
+                user.set_password(serializer.data.get('new_password'))
+                user.save()
+                update_session_auth_hash(request, user)  # To update session after password change
+                return Response({'message': 'Password changed successfully.'}, status=status.HTTP_200_OK)
+            else:
+
+              return Response({'error': 'Incorrect old password.'}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
